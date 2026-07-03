@@ -112,25 +112,29 @@
 
 
         // ==========================================
+       // ==========================================
         // 3. LOGICA CAPA 2: CENTROS DE SALUD (PUNTOS)
         // ==========================================
         function getColorSalud(tipo) {
-            switch (tipo) {
-                case 'Hospital':         return '#e74c3c';
-                case 'Centro de Salud':  return '#3498db';
-                case 'Posta Sanitaria': return '#2ecc71';
-                default:                 return '#95a5a6';
-            }
+            // Convertimos a minúsculas para que coincida sin importar cómo esté escrito
+            const t = tipo.toLowerCase().trim();
+            
+            if (t.includes('hospital')) return '#e74c3c';       // Rojo
+            if (t.includes('centro de salud')) return '#3498db'; // Azul
+            if (t.includes('posta')) return '#2ecc71';          // Verde
+            return '#95a5a6';                                   // Gris si no coincide
         }
 
         fetch('centros_salud.geojson')
             .then(res => res.json())
             .then(data => {
                 const geojsonSalud = L.geoJSON(data, {
-                    // ASIGNAMOS ESTA CAPA AL PANE SUPERIOR (FLOTANTE)
                     pane: 'paneSalud',
                     pointToLayer: function (feature, latlng) {
-                        const tipoCentro = feature.properties.tipo || 'Otros';
+                        // REVISIÓN CRUCIAL: 
+                        // Si en tu QGIS la columna se llama TIPO en mayúsculas, cambiá acá a feature.properties.TIPO
+                        const tipoCentro = feature.properties.tipo || feature.properties.TIPO || 'Otros';
+                        
                         return L.circleMarker(latlng, {
                             radius: 6,
                             fillColor: getColorSalud(tipoCentro),
@@ -141,21 +145,22 @@
                         });
                     },
                     onEachFeature: function (feature, layer) {
-                        const nombreEstablecimiento = feature.properties.nombre || "Sin nombre";
-                        const tipoCentro = feature.properties.tipo || "No especificado";
+                        const nombreEstablecimiento = feature.properties.nombre || feature.properties.NOMBRE || "Sin nombre";
+                        const tipoCentro = feature.properties.tipo || feature.properties.TIPO || "No especificado";
                         layer.bindPopup(`<b>Establecimiento:</b> ${nombreEstablecimiento}<br><b>Tipo:</b> ${tipoCentro}`);
                     }
                 });
 
-                // Metemos la capa adentro del grupo lógico
+                // 1. Añadimos la capa al grupo
                 capaGroupSalud.addLayer(geojsonSalud);
-
+                
+                // 2. FORCE RE-ORDER: Forzamos de forma estricta que los puntos vayan al frente de todo
+                geojsonSalud.bringToFront();
+                
                 // Agregar la leyenda visual
                 crearLeyendaSalud();
             })
             .catch(err => console.error("Error en centros de salud:", err));
-
-
         // ==========================================
         // 4. CONTROL DE CAPAS (INTERRUPTOR PRENDER/APAGAR)
         // ==========================================
