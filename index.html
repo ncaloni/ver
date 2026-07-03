@@ -79,20 +79,6 @@
 
         let geojsonDeptos;
         let geojsonSalud;
-// ==========================================
-        // 1.1 AGREGAR TÍTULO PRINCIPAL AL MAPA
-        // ==========================================
-        const tituloControl = L.control({ position: 'topleft' });
-        
-        tituloControl.onAdd = function() {
-            const div = L.DomUtil.create('div', 'map-title');
-            div.innerHTML = `
-                <h2>Geoportal de Infraestructura Sanitaria</h2>
-                <p>Provincia de Mendoza &bull; Análisis de Capacidad Espacial</p>
-            `;
-            return div;
-        };
-        tituloControl.addTo(map);
         // ==========================================
         // 2. FUNCIONES DE COLORES
         // ==========================================
