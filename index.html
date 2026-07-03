@@ -108,8 +108,43 @@
             return '#95a5a6';                             // Gris (Otros/Postas)
         }
 
+        // 4. CARGA DE DATOS: CENTROS DE SALUD
         // ==========================================
-        // 4. CARGA DE DATOS: DEPARTAMENTOS
+        fetch('centros_salud.geojson')
+            .then(res => res.json())
+            .then(data => {
+                geojsonSalud = L.geoJSON(data, {
+                    pane: 'paneSalud',
+                    pointToLayer: function (feature, latlng) {
+                        const tipoCentro = feature.properties.tipo || 'Otros';
+                        return L.circleMarker(latlng, {
+                            radius: 6,
+                            fillColor: getColorSalud(tipoCentro),
+                            color: '#ffffff',
+                            weight: 1.5,
+                            opacity: 1,
+                            fillOpacity: 0.9
+                        });
+                    },
+                    onEachFeature: function (feature, layer) {
+                        const nombreEstablecimiento = feature.properties.nombre || "Sin nombre";
+                        const tipoCentro = feature.properties.tipo || "No especificado";
+                        const departamento = feature.properties.departamen || "";
+                        layer.bindPopup(`<b>Establecimiento:</b> ${nombreEstablecimiento}<br><b>Tipo:</b> ${tipoCentro}<br><b>Dpto:</b> ${departamento}`);
+                    }
+                });
+
+                capaGroupSalud.addLayer(geojsonSalud);
+                
+                // Forzar de forma estricta que los puntos se superpongan visualmente
+                geojsonSalud.bringToFront();
+                
+                // Generar leyenda de salud
+                crearLeyendaSalud();
+            })
+            .catch(err => console.error("Error cargando centros de salud:", err));
+        // ==========================================
+        // 5. CARGA DE DATOS: DEPARTAMENTOS
         // ==========================================
         fetch('depto_mendoza.geojson')
             .then(res => res.json())
@@ -155,42 +190,6 @@
             .catch(err => console.error("Error cargando departamentos:", err));
 
         // ==========================================
-        // 5. CARGA DE DATOS: CENTROS DE SALUD
-        // ==========================================
-        fetch('centros_salud.geojson')
-            .then(res => res.json())
-            .then(data => {
-                geojsonSalud = L.geoJSON(data, {
-                    pane: 'paneSalud',
-                    pointToLayer: function (feature, latlng) {
-                        const tipoCentro = feature.properties.tipo || 'Otros';
-                        return L.circleMarker(latlng, {
-                            radius: 6,
-                            fillColor: getColorSalud(tipoCentro),
-                            color: '#ffffff',
-                            weight: 1.5,
-                            opacity: 1,
-                            fillOpacity: 0.9
-                        });
-                    },
-                    onEachFeature: function (feature, layer) {
-                        const nombreEstablecimiento = feature.properties.nombre || "Sin nombre";
-                        const tipoCentro = feature.properties.tipo || "No especificado";
-                        const departamento = feature.properties.departamen || "";
-                        layer.bindPopup(`<b>Establecimiento:</b> ${nombreEstablecimiento}<br><b>Tipo:</b> ${tipoCentro}<br><b>Dpto:</b> ${departamento}`);
-                    }
-                });
-
-                capaGroupSalud.addLayer(geojsonSalud);
-                
-                // Forzar de forma estricta que los puntos se superpongan visualmente
-                geojsonSalud.bringToFront();
-                
-                // Generar leyenda de salud
-                crearLeyendaSalud();
-            })
-            .catch(err => console.error("Error cargando centros de salud:", err));
-
         // ==========================================
         // 6. CONTROL DE CAPAS (INTERRUPTOR SUPERIOR DERECHO)
         // ==========================================
