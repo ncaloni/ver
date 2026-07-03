@@ -153,3 +153,108 @@
                 crearLeyendaDeptos(breaks);
             })
             .catch(err => console.error("Error cargando departamentos:", err));
+
+        // ==========================================
+        // 5. CARGA DE DATOS: CENTROS DE SALUD
+        // ==========================================
+        fetch('centros_salud.geojson')
+            .then(res => res.json())
+            .then(data => {
+                geojsonSalud = L.geoJSON(data, {
+                    pane: 'paneSalud',
+                    pointToLayer: function (feature, latlng) {
+                        const tipoCentro = feature.properties.tipo || 'Otros';
+                        return L.circleMarker(latlng, {
+                            radius: 6,
+                            fillColor: getColorSalud(tipoCentro),
+                            color: '#ffffff',
+                            weight: 1.5,
+                            opacity: 1,
+                            fillOpacity: 0.9
+                        });
+                    },
+                    onEachFeature: function (feature, layer) {
+                        const nombreEstablecimiento = feature.properties.nombre || "Sin nombre";
+                        const tipoCentro = feature.properties.tipo || "No especificado";
+                        const departamento = feature.properties.departamen || "";
+                        layer.bindPopup(`<b>Establecimiento:</b> ${nombreEstablecimiento}<br><b>Tipo:</b> ${tipoCentro}<br><b>Dpto:</b> ${departamento}`);
+                    }
+                });
+
+                capaGroupSalud.addLayer(geojsonSalud);
+                
+                // Forzar de forma estricta que los puntos se superpongan visualmente
+                geojsonSalud.bringToFront();
+                
+                // Generar leyenda de salud
+                crearLeyendaSalud();
+            })
+            .catch(err => console.error("Error cargando centros de salud:", err));
+
+        // ==========================================
+        // 6. CONTROL DE CAPAS (INTERRUPTOR SUPERIOR DERECHO)
+        // ==========================================
+        const overlays = {
+            "Población (Departamentos)": capaGroupDeptos,
+            "Centros de Salud (Puntos)": capaGroupSalud
+        };
+
+        // Activamos el control con los grupos ya instanciados
+        L.control.layers({}, overlays, { collapsed: false }).addTo(map);
+
+        // Evento de control: Si el usuario apaga y prende capas, re-forzamos que salud quede arriba
+        map.on('overlayadd', function() {
+            if (geojsonSalud) {
+                geojsonSalud.bringToFront();
+            }
+        });
+
+        // ==========================================
+        // 7. FUNCIONES CONCRETAS DE LEYENDAS Visuales
+        // ==========================================
+        function crearLeyendaDeptos(breaks) {
+            const legend = L.control({ position: 'bottomright' });
+            legend.onAdd = function () {
+                const div = L.DomUtil.create('div', 'info legend');
+                div.innerHTML = '<h4>Población por Depto. (Jenks)</h4>';
+                for (let i = 0; i < breaks.length - 1; i++) {
+                    const desde = Math.round(breaks[i]).toLocaleString('es-AR');
+                    const hasta = Math.round(breaks[i + 1]).toLocaleString('es-AR');
+                    div.innerHTML += `
+                        <div class="legend-item">
+                            <div class="color-box" style="background:${getColorDepto(breaks[i+1], breaks)}"></div>
+                            <span>${desde} &ndash; ${hasta} hab.</span>
+                        </div>`;
+                }
+                return div;
+            };
+            legend.addTo(map);
+        }
+
+        function crearLeyendaSalud() {
+            const legendSalud = L.control({ position: 'bottomleft' });
+            legendSalud.onAdd = function () {
+                const div = L.DomUtil.create('div', 'info legend');
+                div.innerHTML = '<h4>Estructura Sanitaria</h4>';
+                
+                const categorias = [
+                    { nombre: 'Hospital', color: '#e74c3c' },
+                    { nombre: 'CAPS', color: '#3498db' },
+                    { nombre: 'CIC', color: '#2ecc71' },
+                    { nombre: 'Otros / Postas', color: '#95a5a6' }
+                ];
+                
+                categorias.forEach(cat => {
+                    div.innerHTML += `
+                        <div class="legend-item">
+                            <span class="circle-marker" style="background:${cat.color}"></span>
+                            <span>${cat.nombre}</span>
+                        </div>`;
+                });
+                return div;
+            };
+            legendSalud.addTo(map);
+        }
+    </script>
+</body>
+</html>
