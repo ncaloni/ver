@@ -69,23 +69,19 @@
             attribution: '&copy; OpenStreetMap &copy; CARTO'
         }).addTo(map);
 
-        // Creamos los Panes para asegurar un orden estricto de renderizado en el navegador
-        map.createPane('paneDepartamentos');
-        map.getPane('paneDepartamentos').style.zIndex = 400; // Capa de abajo
-
-        map.createPane('paneSalud');
-        map.getPane('paneSalud').style.zIndex = 650; // Capa de arriba (puntos flotantes)
+        // Forzamos renderizadores SVG independientes para garantizar el orden de apilado (Z-Index)
+        const rendererDeptos = L.svg({ padding: 0.5 });
+        const rendererSalud = L.svg({ padding: 0.5 });
 
         // Inicializamos los grupos lógicos vacíos y los añadimos al mapa
         const capaGroupDeptos = L.layerGroup().addTo(map);
         const capaGroupSalud = L.layerGroup().addTo(map);
 
-        // Variables globales para guardar las instancias de las capas GeoJSON
         let geojsonDeptos;
         let geojsonSalud;
 
         // ==========================================
-        // 2. FUNCIÓN DE COLORES PARA DEPARTAMENTOS
+        // 2. FUNCIONES DE COLORES
         // ==========================================
         function getColorDepto(v, breaks) {
             return v <= breaks[1] ? '#fef0d9' :
@@ -95,9 +91,6 @@
                                     '#b30000';
         }
 
-        // ==========================================
-        // 3. FUNCIÓN DE COLORES PARA CENTROS DE SALUD (Tipos reales)
-        // ==========================================
         function getColorSalud(tipo) {
             if (!tipo) return '#95a5a6';
             const t = tipo.toUpperCase().trim();
@@ -108,108 +101,97 @@
             return '#95a5a6';                             // Gris (Otros/Postas)
         }
 
-        // 4. CARGA DE DATOS: CENTROS DE SALUD
         // ==========================================
-        fetch('centros_salud.geojson')
-            .then(res => res.json())
-            .then(data => {
-                geojsonSalud = L.geoJSON(data, {
-                    pane: 'paneSalud',
-                    pointToLayer: function (feature, latlng) {
-                        const tipoCentro = feature.properties.tipo || 'Otros';
-                        return L.circleMarker(latlng, {
-                            radius: 6,
-                            fillColor: getColorSalud(tipoCentro),
-                            color: '#ffffff',
-                            weight: 1.5,
-                            opacity: 1,
-                            fillOpacity: 0.9
-                        });
-                    },
-                    onEachFeature: function (feature, layer) {
-                        const nombreEstablecimiento = feature.properties.nombre || "Sin nombre";
-                        const tipoCentro = feature.properties.tipo || "No especificado";
-                        const departamento = feature.properties.departamen || "";
-                        layer.bindPopup(`<b>Establecimiento:</b> ${nombreEstablecimiento}<br><b>Tipo:</b> ${tipoCentro}<br><b>Dpto:</b> ${departamento}`);
-                    }
-                });
+        // 3. CARGA SECUENCIAL DE DATOS (PROMISE.ALL)
+        // ==========================================
+        // Forzamos a que se descarguen ambos archivos antes de empezar a dibujar ninguno
+        Promise.all([
+            fetch('depto_mendoza.geojson').then(res => res.json()),
+            fetch('centros_salud.geojson').then(res => res.json())
+        ])
+        .then(([dataDeptos, dataSalud]) => {
+            
+            // --- A. PROCESAR Y DIBUJAR DEPARTAMENTOS PRIMERO ---
+            const valoresPoblacion = dataDeptos.features.map(f => f.properties.poblacion || 0);
+            const clusters = ss.ckmeans(valoresPoblacion, 5);
+            const breaks = [
+                Math.min(...valoresPoblacion),
+                clusters[0][clusters[0].length - 1],
+                clusters[1][clusters[1].length - 1],
+                clusters[2][clusters[2].length - 1],
+                clusters[3][clusters[3].length - 1],
+                clusters[4][clusters[4].length - 1]
+            ];
 
-                capaGroupSalud.addLayer(geojsonSalud);
-                
-                // Forzar de forma estricta que los puntos se superpongan visualmente
+            geojsonDeptos = L.geoJSON(dataDeptos, {
+                renderer: rendererDeptos, // Asignamos renderizador de fondo
+                style: function(feature) {
+                    return {
+                        fillColor: getColorDepto(feature.properties.poblacion || 0, breaks),
+                        weight: 1.5, 
+                        color: '#ffffff', 
+                        fillOpacity: 0.7
+                    };
+                },
+                onEachFeature: function(feature, layer) {
+                    const nombre = feature.properties.NAM || feature.properties.departamento || "Desconocido";
+                    const pob = (feature.properties.poblacion || 0).toLocaleString('es-AR');
+                    layer.bindPopup(`<b>Departamento:</b> ${nombre}<br><b>Población:</b> ${pob} hab.`);
+                    
+                    layer.on({
+                        mouseover: e => { e.target.setStyle({ weight: 3, color: '#666', fillOpacity: 0.8 }); },
+                        mouseout: e => { geojsonDeptos.resetStyle(e.target); }
+                    });
+                }
+            });
+            capaGroupDeptos.addLayer(geojsonDeptos);
+            crearLeyendaDeptos(breaks);
+
+
+            // --- B. DIBUJAR CENTROS DE SALUD SEGUNDO (QUEDAN ARRIBA SI O SI) ---
+            geojsonSalud = L.geoJSON(dataSalud, {
+                renderer: rendererSalud, // Asignamos renderizador de frente
+                pointToLayer: function (feature, latlng) {
+                    const tipoCentro = feature.properties.tipo || 'Otros';
+                    return L.circleMarker(latlng, {
+                        radius: 6,
+                        fillColor: getColorSalud(tipoCentro),
+                        color: '#ffffff',
+                        weight: 1.5,
+                        opacity: 1,
+                        fillOpacity: 0.9
+                    });
+                },
+                onEachFeature: function (feature, layer) {
+                    const nombreEstablecimiento = feature.properties.nombre || "Sin nombre";
+                    const tipoCentro = feature.properties.tipo || "No especificado";
+                    const departamento = feature.properties.departamen || "";
+                    layer.bindPopup(`<b>Establecimiento:</b> ${nombreEstablecimiento}<br><b>Tipo:</b> ${tipoCentro}<br><b>Dpto:</b> ${departamento}`);
+                }
+            });
+            capaGroupSalud.addLayer(geojsonSalud);
+            
+            // Forzado explícito de orden en el árbol DOM del navegador
+            geojsonSalud.bringToFront();
+            crearLeyendaSalud();
+
+            // --- C. INICIALIZAR EL CONTROL DE CAPAS ---
+            const overlays = {
+                "Población (Departamentos)": capaGroupDeptos,
+                "Centros de Salud (Puntos)": capaGroupSalud
+            };
+            L.control.layers({}, overlays, { collapsed: false }).addTo(map);
+
+            // Re-forzar orden si el usuario apaga y prende capas en la interfaz
+            map.on('overlayadd', function() {
                 geojsonSalud.bringToFront();
-                
-                // Generar leyenda de salud
-                crearLeyendaSalud();
-            })
-            .catch(err => console.error("Error cargando centros de salud:", err));
-        // ==========================================
-        // 5. CARGA DE DATOS: DEPARTAMENTOS
-        // ==========================================
-        fetch('depto_mendoza.geojson')
-            .then(res => res.json())
-            .then(data => {
-                const valoresPoblacion = data.features.map(f => f.properties.poblacion || 0);
-                const clusters = ss.ckmeans(valoresPoblacion, 5);
-                const breaks = [
-                    Math.min(...valoresPoblacion),
-                    clusters[0][clusters[0].length - 1],
-                    clusters[1][clusters[1].length - 1],
-                    clusters[2][clusters[2].length - 1],
-                    clusters[3][clusters[3].length - 1],
-                    clusters[4][clusters[4].length - 1]
-                ];
+            });
+        })
+        .catch(err => console.error("Error procesando los datos geográficos:", err));
 
-                geojsonDeptos = L.geoJSON(data, {
-                    pane: 'paneDepartamentos',
-                    style: function(feature) {
-                        return {
-                            fillColor: getColorDepto(feature.properties.poblacion || 0, breaks),
-                            weight: 1.5, 
-                            color: '#ffffff', 
-                            fillOpacity: 0.7
-                        };
-                    },
-                    onEachFeature: function(feature, layer) {
-                        const nombre = feature.properties.NAM || feature.properties.departamento || "Desconocido";
-                        const pob = (feature.properties.poblacion || 0).toLocaleString('es-AR');
-                        layer.bindPopup(`<b>Departamento:</b> ${nombre}<br><b>Población:</b> ${pob} hab.`);
-                        
-                        layer.on({
-                            mouseover: e => { e.target.setStyle({ weight: 3, color: '#666', fillOpacity: 0.8 }); },
-                            mouseout: e => { geojsonDeptos.resetStyle(e.target); }
-                        });
-                    }
-                });
-
-                capaGroupDeptos.addLayer(geojsonDeptos);
-                
-                // Generar leyenda una vez calculados los cortes
-                crearLeyendaDeptos(breaks);
-            })
-            .catch(err => console.error("Error cargando departamentos:", err));
 
         // ==========================================
-        // ==========================================
-        // 6. CONTROL DE CAPAS (INTERRUPTOR SUPERIOR DERECHO)
-        // ==========================================
-        const overlays = {
-            "Población (Departamentos)": capaGroupDeptos,
-            "Centros de Salud (Puntos)": capaGroupSalud
-        };
-
-        // Activamos el control con los grupos ya instanciados
-        L.control.layers({}, overlays, { collapsed: false }).addTo(map);
-
-        // Evento de control: Si el usuario apaga y prende capas, re-forzamos que salud quede arriba
-        map.on('overlayadd', function() {
-            if (geojsonSalud) {
-                geojsonSalud.bringToFront();
-            }
-        });
-
-        // ==========================================
-        // 7. FUNCIONES CONCRETAS DE LEYENDAS Visuales
+        // 4. FUNCIONES CONCRETAS DE LEYENDAS Visuales
         // ==========================================
         function crearLeyendaDeptos(breaks) {
             const legend = L.control({ position: 'bottomright' });
@@ -239,7 +221,7 @@
                 const categorias = [
                     { nombre: 'Hospital', color: '#e74c3c' },
                     { nombre: 'CAPS', color: '#3498db' },
-                    { nombre: 'CIC', color: '#2ecc71' },
+                    { font_name: 'CIC', nombre: 'CIC', color: '#2ecc71' },
                     { nombre: 'Otros / Postas', color: '#95a5a6' }
                 ];
                 
