@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geoportal Mendoza - Población y Salud</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script src="https://unpkg.com/simple-statistics@7.8.3/dist/simple-statistics.min.js"></script>
+    
+    <style>
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #map { height: 100vh; width: 100vw; }
+        
+        /* Estilos para las leyendas del mapa */
+        .info {
+            background: white; padding: 12px; border-radius: 8px;
+            line-height: 18px; box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            margin-bottom: 10px; max-width: 250px;
+        }
+        .info h4 { margin: 0 0 8px; color: #333; }
+        .legend-item { display: flex; align-items: center; margin-bottom: 5px; }
+        .color-box { width: 18px; height: 18px; margin-right: 8px; opacity: 0.8; }
+        .circle-marker { width: 12px; height: 12px; border-radius: 50%; margin-right: 10px; display: inline-block; }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <script>
+        // ==========================================
+        // 1. INICIALIZACIÓN DEL MAPA Y BASEMAP
+        // ==========================================
+        const map = L.map('map').setView([-34.6, -68.5], 7);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO'
+        }).addTo(map);
+
+        // Contenedor para el control de capas (Layer Control)
+        const capasBase = {};
+        const capasSuperpuestas = {};
+
+        // ==========================================
+        // 2. LOGICA CAPA 1: DEPARTAMENTOS (COROPLETA)
+        // ==========================================
+        function getColorDepto(v, breaks) {
+            return v <= breaks[1] ? '#fef0d9' :
+                   v <= breaks[2] ? '#fdcc8a' :
+                   v <= breaks[3] ? '#fc8d59' :
+                   v <= breaks[4] ? '#e34a33' :
+                                    '#b30000';
+        }
+
+        fetch('depto_mendoza.geojson')
+            .then(res => res.json())
+            .then(data => {
+                // Modifica 'poblacion' si tu columna en el GeoJSON se llama distinto
+                const valoresPoblacion = data.features.map(f => f.properties.poblacion || 0);
+                const clusters = ss.ckmeans(valoresPoblacion, 5);
+                const breaks = [
+                    Math.min(...valoresPoblacion),
+                    clusters[0][clusters[0].length - 1],
+                    clusters[1][clusters[1].length - 1],
+                    clusters[2][clusters[2].length - 1],
+                    clusters[3][clusters[3].length - 1],
+                    clusters[4][clusters[4].length - 1]
+                ];
+
+                const capaDeptos = L.geoJSON(data, {
+                    style: function(feature) {
+                        return {
+                            fillColor: getColorDepto(feature.properties.poblacion, breaks),
+                            weight: 1.5, color: '#ffffff', fillOpacity: 0.7
+                        };
+                    },
+                    onEachFeature: function(feature, layer) {
+                        const nombre = feature.properties.NAM || feature.properties.departamento;
+                        const pob = (feature.properties.poblacion || 0).toLocaleString('es-AR');
+                        layer.bindPopup(`<b>Departamento:</b> ${nombre}<br><b>Población:</b> ${pob} hab.`);
+                        
+                        layer.on({
+                            mouseover: e => { e.target.setStyle({ weight: 3, color: '#666', fillOpacity: 0.8 }); },
+                            mouseout: e => { capaDeptos.resetStyle(e.target); }
+                        });
+                    }
+                }).addTo(map);
+
+                // Agregar la leyenda de departamentos
+                crearLeyendaDeptos(breaks);
+            })
+            .catch(err => console.error("Error en departamentos:", err));
+
+
+        // ==========================================
+        // 3. LOGICA CAPA 2: CENTROS DE SALUD (PUNTOS)
+        // ==========================================
+        // Función para definir el color del punto según el Tipo de Centro
+        function getColorSalud(tipo) {
+            switch (tipo) {
+                case 'Hospital':         return '#e74c3c'; // Rojo
+                case 'Centro de Salud':  return '#3498db'; // Azul
+                case 'Posta Sanitaria': return '#2ecc71'; // Verde
+                default:                 return '#95a5a6'; // Gris (por si hay otros)
+            }
+        }
+
+        fetch('centros_salud.geojson')
+            .then(res => res.json())
+            .then(data => {
+                const capaSalud = L.geoJSON(data, {
+                    // Convertimos los puntos nativos en CircleMarkers interactivos
+                    pointToLayer: function (feature, latlng) {
+                        // Modifica 'tipo' si tu columna se llama 'TIPO', 'categoria', etc.
+                        const tipoCentro = feature.properties.tipo || 'Otros';
+                        
+                        return L.circleMarker(latlng, {
+                            radius: 6,
+                            fillColor: getColorSalud(tipoCentro),
+                            color: '#ffffff',
+                            weight: 1,
+                            opacity: 1,
+                            fillOpacity: 0.9
+                        });
+                    },
+                    onEachFeature: function (feature, layer) {
+                        const nombreEstablecimiento = feature.properties.nombre || "Sin nombre";
+                        const tipoCentro = feature.properties.tipo || "No especificado";
+                        
+                        layer.bindPopup(`<b>Establecimiento:</b> ${nombreEstablecimiento}<br><b>Tipo:</b> ${tipoCentro}`);
+                    }
+                }).addTo(map);
+
+                // Agregar la leyenda de salud
+                crearLeyendaSalud();
+            })
+            .catch(err => console.error("Error en centros de salud:", err));
+
+
+        // ==========================================
+        // 4. FUNCIONES PARA GENERAR LAS LEYENDAS
+        // ==========================================
+        function crearLeyendaDeptos(breaks) {
+            const legend = L.control({ position: 'bottomright' });
+            legend.onAdd = function () {
+                const div = L.DomUtil.create('div', 'info');
+                div.innerHTML = '<h4>Población por Depto. (Jenks)</h4>';
+                for (let i = 0; i < breaks.length - 1; i++) {
+                    const desde = Math.round(breaks[i]).toLocaleString('es-AR');
+                    const hasta = Math.round(breaks[i + 1]).toLocaleString('es-AR');
+                    div.innerHTML += `
+                        <div class="legend-item">
+                            <div class="color-box" style="background:${getColorDepto(breaks[i+1], breaks)}"></div>
+                            <span>${desde} &ndash; ${hasta} hab.</span>
+                        </div>`;
+                }
+                return div;
+            };
+            legend.addTo(map);
+        }
+
+        function crearLeyendaSalud() {
+            const legendSalud = L.control({ position: 'bottomleft' });
+            legendSalud.onAdd = function () {
+                const div = L.DomUtil.create('div', 'info');
+                div.innerHTML = '<h4>Estructura Sanitaria</h4>';
+                const tipos = ['Hospital', 'Centro de Salud', 'Posta Sanitaria', 'Otros'];
+                
+                tipos.forEach(tipo => {
+                    div.innerHTML += `
+                        <div class="legend-item">
+                            <span class="circle-marker" style="background:${getColorSalud(tipo)}"></span>
+                            <span>${tipo}</span>
+                        </div>`;
+                });
+                return div;
+            };
+            legendSalud.addTo(map);
+        }
+    </script>
+</body>
+</html>
